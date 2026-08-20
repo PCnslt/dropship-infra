@@ -1,0 +1,171 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "Dropship marketplace \u2014 AliExpress-direct catalog + order services\
+  \ (free-tier)"
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 15
+    MemorySize: 128
+    Architectures:
+    - arm64
+    Handler: handler.lambda_handler
+    Layers:
+    - Ref: SharedLayer
+    Environment:
+      Variables:
+        ALIEXPRESS_APP_KEY: '543286'
+        ALIEXPRESS_APP_SECRET: au5slCs3eWYNug7ndAbBUx18HLP3X9uc
+        ALIEXPRESS_SESSION: ''
+Resources:
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: dropship-shared
+      ContentUri: ../../layer
+      CompatibleRuntimes:
+      - python3.11
+      RetentionPolicy: Delete
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+        - '*'
+        AllowHeaders:
+        - Content-Type
+        - Authorization
+        AllowMethods:
+        - GET
+        - POST
+        - OPTIONS
+        - DELETE
+        - PATCH
+        - PUT
+  CatalogFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: CatalogFunction
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /health
+            Method: GET
+        ListProducts:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /products
+            Method: GET
+        Dap:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /dap
+            Method: GET
+        GetProduct:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /products/{id}
+            Method: GET
+    Metadata:
+      SamResourceId: CatalogFunction
+  OrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: OrderFunction
+      Events:
+        CreateOrder:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /orders
+            Method: POST
+        GetOrder:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /orders/{id}
+            Method: GET
+        Track:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /track/{id}
+            Method: GET
+    Metadata:
+      SamResourceId: OrderFunction
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: SiteBucket
+      PolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal: '*'
+          Action: s3:GetObject
+          Resource:
+            Fn::Sub: ${SiteBucket.Arn}/*
+  SiteCloudFront:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Origins:
+        - Id: S3
+          DomainName:
+            Fn::GetAtt:
+            - SiteBucket
+            - RegionalDomainName
+          S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: S3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+          - GET
+          - HEAD
+          CachedMethods:
+          - GET
+          - HEAD
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          MinTTL: 0
+          DefaultTTL: 300
+          MaxTTL: 1200
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+Outputs:
+  ApiUrl:
+    Description: Base URL of the dropship API
+    Value:
+      Fn::Sub: https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/
+  SiteBucketName:
+    Description: S3 bucket for the static site
+    Value:
+      Ref: SiteBucket
+  SiteUrl:
+    Description: Frontend site URL (CloudFront)
+    Value:
+      Fn::Sub: https://${SiteCloudFront.DomainName}/
