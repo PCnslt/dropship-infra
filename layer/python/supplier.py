@@ -74,6 +74,35 @@ class AliExpressProvider:
         })
         return _map_feed(raw)
 
+    def categories(self):
+        """Real AliExpress dropship categories (547 total)."""
+        raw = self.client.categories()
+        rsp = raw.get("aliexpress_ds_category_get_response", raw)
+        result = (rsp.get("resp_result") or {}).get("result") or {}
+        cats = (result.get("categories") or {}).get("category") or []
+        out = []
+        for c in cats:
+            if not isinstance(c, dict):
+                continue
+            out.append({
+                "id": str(c.get("category_id") or ""),
+                "name": c.get("category_name") or "",
+                "parent_id": str(c.get("parent_category_id") or ""),
+            })
+        # only top-level (no parent) for the nav strip
+        top = [c for c in out if not c["parent_id"]]
+        return {"all": out, "top": top}
+
+    def search_by_category(self, category_id, page_size="20", country="US", **kw):
+        """Search products within a category using the feed endpoint with category filter."""
+        raw = self.client._call("aliexpress.ds.recommend.feed.get", {
+            "feed_name": "DS_NewArrivals", "country": country, "page_size": page_size,
+            "page_no": kw.get("page_no", "1"), "category_id": category_id,
+            "target_currency": kw.get("currency", "USD"),
+            "target_language": kw.get("lang", "EN"),
+        })
+        return _map_feed(raw)
+
     def create_order(self, logistics_address, product_items):
         return self.client.create_order(logistics_address, product_items)
 

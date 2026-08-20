@@ -87,6 +87,13 @@ Resources:
               Ref: HttpApi
             Path: /products
             Method: GET
+        Categories:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /categories
+            Method: GET
         Dap:
           Type: HttpApi
           Properties:

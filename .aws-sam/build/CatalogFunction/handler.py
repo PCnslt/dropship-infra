@@ -64,12 +64,15 @@ def h_list_products(event):
     qs = event.get("queryStringParameters") or {}
     q = (qs.get("q") or "").lower()
     feed = qs.get("feed") or ""
+    category_id = qs.get("category_id") or ""
     prov = supplier.get_provider()
 
     # Real provider: pull live products from AliExpress feed (or curated catalog).
     if prov.name == "aliexpress":
         try:
-            if feed:
+            if category_id:
+                raw = prov.search_by_category(category_id, page_size="20", country=qs.get("country", "US"))
+            elif feed:
                 raw = prov.search(feed_name=feed, page_size="20", country=qs.get("country", "US"))
             else:
                 # if curated catalog has items, resolve them; else pull default feed
@@ -164,6 +167,22 @@ def h_import_product(event):
     return ok({"product": rec, "live": p})
 
 
+def h_categories(event):
+    prov = supplier.get_provider()
+    if prov.name == "aliexpress":
+        try:
+            return ok(prov.categories())
+        except Exception as e:
+            print(f"[catalog] categories failed: {e}")
+    # demo fallback
+    return ok({"all": [], "top": [
+        {"id": "electronics", "name": "Electronics"},
+        {"id": "home", "name": "Home & Kitchen"},
+        {"id": "sports", "name": "Sports & Outdoors"},
+        {"id": "beauty", "name": "Beauty"},
+    ]})
+
+
 def h_dap_disclosure(event):
     return ok({
         "dap": True,
@@ -178,6 +197,7 @@ def h_dap_disclosure(event):
 ROUTES = [
     ("GET", "/health", h_health),
     ("GET", "/products", h_list_products),
+    ("GET", "/categories", h_categories),
     ("GET", "/dap", h_dap_disclosure),
     ("GET", "/oauth/callback", h_oauth_callback),
     ("POST", "/import", h_import_product),
