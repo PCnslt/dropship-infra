@@ -79,3 +79,50 @@ def list_products(active_only=True):
 
 def delete_product(pid):
     _table().delete_item(Key={"PK": f"PRODUCT#{pid}", "SK": f"PRODUCT#{pid}"})
+
+
+# ---------- Orders ----------
+def put_order(order_id, buyer_sub="", items=None, address=None, status="pending",
+              supplier_order_id="", tracking="", total=0.0, currency="CAD"):
+    pk = f"ORDER#{order_id}"
+    item = {"PK": pk, "SK": pk, "id": order_id, "buyer_sub": buyer_sub,
+            "items": items or [], "address": address or {}, "status": status,
+            "supplier_order_id": supplier_order_id, "tracking": tracking,
+            "total": total, "currency": currency, "created": _ts()}
+    return _put(item)
+
+
+def get_order(order_id):
+    return _get(f"ORDER#{order_id}", f"ORDER#{order_id}")
+
+
+def list_orders(buyer_sub=""):
+    items = _scan("begins_with(PK, :p)", {}, {":p": "ORDER#"})
+    if buyer_sub:
+        items = [i for i in items if i.get("buyer_sub") == buyer_sub]
+    return items
+
+
+def update_order(order_id, **fields):
+    item = get_order(order_id)
+    if not item:
+        return None
+    for k, v in fields.items():
+        item[k] = v
+    _put(item)
+    return item
+
+
+# ---------- Messages (buyer↔supplier relay) ----------
+def put_message(order_id, sender, text):
+    mid = f"m-{_ts()}-{abs(hash(text)) % 10000}"
+    pk = f"MSG#{order_id}"
+    item = {"PK": pk, "SK": mid, "id": mid, "order_id": order_id,
+            "sender": sender, "text": text, "created": _ts()}
+    return _put(item)
+
+
+def list_messages(order_id):
+    items = _scan("begins_with(PK, :p)", {}, {":p": f"MSG#{order_id}"})
+    items.sort(key=lambda x: x.get("created", 0))
+    return items

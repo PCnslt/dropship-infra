@@ -128,6 +128,11 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: OrderFunction
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName: dropship-catalog
+      - SSMParameterReadPolicy:
+          ParameterName: dropship/aliexpress/*
       Events:
         CreateOrder:
           Type: HttpApi
@@ -136,12 +141,33 @@ Resources:
               Ref: HttpApi
             Path: /orders
             Method: POST
+        ListOrders:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /orders
+            Method: GET
         GetOrder:
           Type: HttpApi
           Properties:
             ApiId:
               Ref: HttpApi
             Path: /orders/{id}
+            Method: GET
+        SendMessage:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /orders/{id}
+            Method: POST
+        ListMessages:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /messages/{id}
             Method: GET
         Track:
           Type: HttpApi

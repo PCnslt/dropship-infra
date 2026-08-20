@@ -125,10 +125,13 @@ class AliExpressClient:
         })
 
     def create_order(self, logistics_address, product_items):
+        # normalize product items to AE shape (product_count, product_id)
+        norm = [{"product_id": it.get("product_id"), "product_count": int(it.get("quantity", it.get("product_count", 1)))}
+                for it in product_items]
         return self._call("aliexpress.ds.order.create", {
             "param_place_order_request4_open_api_d_t_o": json.dumps({
                 "logistics_address": logistics_address,
-                "product_items": product_items,
+                "product_items": norm,
             }),
         })
 

@@ -104,7 +104,9 @@ class AliExpressProvider:
         return _map_feed(raw)
 
     def create_order(self, logistics_address, product_items):
-        return self.client.create_order(logistics_address, product_items)
+        # Map our simplified address to AliExpress's required logistics_address shape.
+        addr = _map_address(logistics_address)
+        return self.client.create_order(addr, product_items)
 
     def order_details(self, order_id):
         return self.client.order_details(order_id)
@@ -147,8 +149,26 @@ def _map_feed(raw):
     return out
 
 
+def _map_address(addr):
+    """Map our simplified address to AliExpress logistics_address shape.
+
+    AliExpress requires: address (street), city, province, country, zip, phone,
+    contact_person. Our client sends name/line1/city/country/postal.
+    """
+    return {
+        "address": addr.get("line1") or addr.get("address") or "",
+        "address2": addr.get("line2", ""),
+        "city": addr.get("city", ""),
+        "province": addr.get("province") or addr.get("state") or addr.get("city") or "",
+        "country": addr.get("country", "US"),
+        "zip": addr.get("postal") or addr.get("zip") or "",
+        "mobile_no": addr.get("phone", "0000000000"),
+        "contact_person": addr.get("name", "Buyer"),
+        "full_name": addr.get("name", "Buyer"),
+    }
+
+
 def _map_product(raw):
-    """Map AliExpress `aliexpress.ds.product.get` nested response to a flat product dict."""
     if not isinstance(raw, dict):
         return {"error": "bad response"}
     rsp = raw.get("aliexpress_ds_product_get_response", raw)
