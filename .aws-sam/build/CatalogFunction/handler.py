@@ -127,9 +127,34 @@ def h_list_products(event):
     return ok({"products": out})
 
 
+def _find_in_feed_cache(pid):
+    """Search the feed cache (all keys) for a product by id or source_product_id."""
+    try:
+        items = db._scan("begins_with(PK, :p)", {}, {":p": "CACHE#feed"})
+    except Exception:
+        return None
+    for c in items:
+        prods = c.get("products", []) or []
+        for p in prods:
+            if str(p.get("id")) == str(pid) or str(p.get("source_product_id")) == str(pid):
+                return p
+    return None
+
+
 def h_get_product(event, pid):
     prov = supplier.get_provider()
-    # try curated catalog first, then live supplier lookup
+    # 1) feed cache (rich data for recommended products) — fastest + full data
+    cached = _find_in_feed_cache(pid)
+    if cached:
+        return ok({"product": {
+            "id": cached.get("id"), "source_product_id": cached.get("source_product_id"),
+            "title": cached.get("title", ""), "image": cached.get("image", ""),
+            "category": cached.get("category", ""), "rating": cached.get("rating", ""),
+            "volume": cached.get("volume", 0), "discount": cached.get("discount", ""),
+            "list_price": cached.get("list_price", 0), "source_cost": cached.get("source_cost", 0),
+            "shipping": 5.0, "dap": True,
+        }})
+    # 2) curated catalog
     c = db.get_product(pid)
     if c:
         p = _resolve(prov, c["source_product_id"])
@@ -143,7 +168,7 @@ def h_get_product(event, pid):
                 "list_price": price.list_price, "source_cost": source_cost,
                 "shipping": 5.0, "breakdown": price.__dict__, "dap": True,
             }})
-    # live lookup by product id
+    # 3) live lookup by product id
     p = _resolve(prov, pid)
     if not p:
         return err("product unavailable from supplier", 404)
