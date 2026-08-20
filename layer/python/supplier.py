@@ -103,6 +103,11 @@ class AliExpressProvider:
         })
         return _map_feed(raw)
 
+    def freight(self, product_id, quantity=1, country="US", province=""):
+        """Real shipping cost from AliExpress for a product+destination."""
+        raw = self.client.freight_calculate(product_id, quantity, country, province)
+        return _map_freight(raw)
+
     def create_order(self, logistics_address, product_items):
         # Map our simplified address to AliExpress's required logistics_address shape.
         addr = _map_address(logistics_address)
@@ -147,6 +152,30 @@ def _map_feed(raw):
             "detail_url": p.get("product_detail_url", ""),
         })
     return out
+
+
+def _map_freight(raw):
+    """Map AliExpress freight-calculate response to a simple shipping quote."""
+    if not isinstance(raw, dict):
+        return {"error": "bad response"}
+    rsp = raw.get("aliexpress_logistics_buyer_freight_calculate_response", raw)
+    result = (rsp.get("resp_result") or {}).get("result") or rsp.get("result") or {}
+    services = result.get("aeop_freight_calculate_result_for_buyer_d_t_os") or []
+    if isinstance(services, dict):
+        services = services.get("aeop_freight_calculate_result_for_buyer_d_t_o", []) or []
+    if not services:
+        return {"error": "no freight options"}
+    # pick the cheapest service
+    cheapest = None
+    for s in services:
+        if not isinstance(s, dict):
+            continue
+        price = float(s.get("freight", 0) or 0)
+        if cheapest is None or price < cheapest[0]:
+            cheapest = (price, s)
+    price, svc = cheapest
+    return {"shipping": price, "currency": svc.get("currency", "USD"),
+            "service": svc.get("service_name", ""), "time": svc.get("time", "")}
 
 
 def _map_address(addr):

@@ -70,6 +70,12 @@ def h_list_products(event):
     # Real provider: pull live products from AliExpress feed (or curated catalog).
     if prov.name == "aliexpress":
         try:
+            cache_key = category_id or feed or "default"
+            cached = db.feed_cache_fresh(cache_key, max_age=300)
+            if cached is not None:
+                # already-mapped products cached; apply query filter + return
+                out = [p for p in cached if not q or (q in p["title"].lower() or q in (p.get("category", "") or "").lower())]
+                return ok({"products": out})
             if category_id:
                 raw = prov.search_by_category(category_id, page_size="20", country=qs.get("country", "US"))
             elif feed:
@@ -94,8 +100,6 @@ def h_list_products(event):
                 source_cost = float(p.get("price", 0) or 0)
                 price = pricing.price_product(source_cost, 5.0)
                 title = p.get("title", "")
-                if q and q not in title.lower() and q not in (p.get("category", "") or "").lower():
-                    continue
                 out.append({"id": p.get("id"), "source_product_id": p.get("source_product_id"),
                             "title": title, "image": p.get("image", ""),
                             "category": p.get("category", ""),
@@ -103,6 +107,8 @@ def h_list_products(event):
                             "discount": p.get("discount", ""),
                             "list_price": price.list_price, "source_cost": source_cost,
                             "list_currency": price.currency})
+            db.put_feed_cache(cache_key, out)
+            out = [p for p in out if not q or (q in p["title"].lower() or q in (p.get("category", "") or "").lower())]
             return ok({"products": out})
         except Exception as e:
             print(f"[catalog] live products failed, fallback: {e}")
@@ -167,6 +173,24 @@ def h_import_product(event):
     return ok({"product": rec, "live": p})
 
 
+def h_freight(event):
+    qs = event.get("queryStringParameters") or {}
+    pid = qs.get("product_id") or ""
+    qty = int(qs.get("quantity", 1))
+    country = qs.get("country", "US")
+    if not pid:
+        return err("product_id required")
+    prov = supplier.get_provider()
+    if prov.name == "aliexpress":
+        try:
+            f = prov.freight(pid, qty, country)
+            return ok({"freight": f})
+        except Exception as e:
+            print(f"[catalog] freight failed: {e}")
+    # fallback: flat $5 shipping
+    return ok({"freight": {"shipping": 5.0, "currency": "USD", "service": "standard", "time": "10-20 days"}})
+
+
 def h_categories(event):
     prov = supplier.get_provider()
     if prov.name == "aliexpress":
@@ -198,6 +222,7 @@ ROUTES = [
     ("GET", "/health", h_health),
     ("GET", "/products", h_list_products),
     ("GET", "/categories", h_categories),
+    ("GET", "/freight", h_freight),
     ("GET", "/dap", h_dap_disclosure),
     ("GET", "/oauth/callback", h_oauth_callback),
     ("POST", "/import", h_import_product),

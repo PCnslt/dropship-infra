@@ -78,6 +78,9 @@ Resources:
         Categories:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: /categories, Method: GET }
+        Freight:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /freight, Method: GET }
         Dap:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: /dap, Method: GET }

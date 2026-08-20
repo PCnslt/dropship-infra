@@ -9,6 +9,8 @@ Table: single-table pattern like Passage.
 """
 import os
 import time
+import json
+import decimal
 import boto3
 
 TABLE = os.environ.get("TABLE_NAME", "dropship-catalog")
@@ -26,14 +28,36 @@ def _table():
     return boto3.resource("dynamodb").Table(TABLE)
 
 
+def _to_ddb(obj):
+    """Recursively convert float -> Decimal so DynamoDB accepts nested structures."""
+    if isinstance(obj, float):
+        return decimal.Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _to_ddb(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_ddb(v) for v in obj]
+    return obj
+
+
+def _from_ddb(obj):
+    """Recursively convert Decimal -> float for clean JSON output."""
+    if isinstance(obj, decimal.Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _from_ddb(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_from_ddb(v) for v in obj]
+    return obj
+
+
 def _put(item):
-    _table().put_item(Item=item)
+    _table().put_item(Item=_to_ddb(item))
     return item
 
 
 def _get(pk, sk):
     r = _table().get_item(Key={"PK": pk, "SK": sk})
-    return r.get("Item")
+    return _from_ddb(r.get("Item"))
 
 
 def _scan(filter_expr="", names=None, values=None):
@@ -53,7 +77,7 @@ def _scan(filter_expr="", names=None, values=None):
             kwargs["ExclusiveStartKey"] = r["LastEvaluatedKey"]
         else:
             break
-    return items
+    return _from_ddb(items)
 
 
 # ---------- Products ----------
@@ -79,6 +103,26 @@ def list_products(active_only=True):
 
 def delete_product(pid):
     _table().delete_item(Key={"PK": f"PRODUCT#{pid}", "SK": f"PRODUCT#{pid}"})
+
+
+# ---------- Feed cache (avoid slow live AliExpress calls on every list) ----------
+def get_feed_cache(key="default"):
+    return _get(f"CACHE#feed", f"CACHE#feed#{key}")
+
+
+def put_feed_cache(key, products, ttl_seconds=300):
+    item = {"PK": f"CACHE#feed", "SK": f"CACHE#feed#{key}",
+            "products": products, "cached_at": _ts(), "ttl": _ts() + ttl_seconds}
+    return _put(item)
+
+
+def feed_cache_fresh(key="default", max_age=300):
+    c = get_feed_cache(key)
+    if not c:
+        return None
+    if _ts() - c.get("cached_at", 0) > max_age:
+        return None
+    return c.get("products", [])
 
 
 # ---------- Orders ----------
