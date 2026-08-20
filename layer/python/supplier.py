@@ -61,7 +61,8 @@ class AliExpressProvider:
         return bool(self.client.session)
 
     def product_details(self, product_id, **kw):
-        return self.client.product_details(product_id, **kw)
+        raw = self.client.product_details(product_id, **kw)
+        return _map_product(raw)
 
     def create_order(self, logistics_address, product_items):
         return self.client.create_order(logistics_address, product_items)
@@ -70,7 +71,51 @@ class AliExpressProvider:
         return self.client.order_details(order_id)
 
 
+def _map_product(raw):
+    """Map AliExpress `aliexpress.ds.product.get` nested response to a flat product dict."""
+    if not isinstance(raw, dict):
+        return {"error": "bad response"}
+    rsp = raw.get("aliexpress_ds_product_get_response", raw)
+    if not isinstance(rsp, dict):
+        return {"error": "bad response shape"}
+    code = rsp.get("rsp_code", rsp.get("code"))
+    if code not in (None, 0, "0", 200, "200"):
+        return {"error": rsp.get("rsp_msg") or f"product unavailable (code {code})"}
+    result = rsp.get("result") or {}
+    subject = result.get("subject") or result.get("product_title") or ""
+    # price: try common fields
+    price = result.get("ws_display") or result.get("target_sale_price") or result.get("sale_price")
+    if not price and result.get("ae_item_sku_info_dtos"):
+        skus = result.get("ae_item_sku_info_dtos", [])
+        if isinstance(skus, list) and skus and isinstance(skus[0], dict):
+            price = skus[0].get("sku_price") or skus[0].get("price")
+    img = ""
+    if result.get("ae_item_properties"):
+        pass  # images often in a separate multimedia field; leave empty fallback
+    return {
+        "id": str(result.get("product_id") or result.get("item_id") or ""),
+        "title": subject,
+        "price": float(price or 0),
+        "currency": result.get("currency_code", "USD"),
+        "image": img,
+        "source": "aliexpress",
+        "category": result.get("category_id", ""),
+    }
+
+
 def get_provider():
-    if os.environ.get("ALIEXPRESS_SESSION"):
+    # token can come from env OR SSM (set by the OAuth callback). Check SSM at
+    # runtime so the provider flips to live without a redeploy.
+    session = os.environ.get("ALIEXPRESS_SESSION", "")
+    if not session:
+        try:
+            import boto3
+            ssm = boto3.client("ssm", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+            r = ssm.get_parameter(Name="/dropship/aliexpress/session", WithDecryption=True)
+            session = r["Parameter"]["Value"]
+        except Exception:
+            session = ""
+    if session:
+        os.environ["ALIEXPRESS_SESSION"] = session
         return AliExpressProvider()
     return MockProvider()

@@ -46,6 +46,14 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: CatalogFunction
+      Policies:
+      - SSMParameterReadPolicy:
+          ParameterName: dropship/aliexpress/*
+      - Statement:
+        - Effect: Allow
+          Action: ssm:PutParameter
+          Resource:
+            Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dropship/aliexpress/*
       Events:
         Health:
           Type: HttpApi
@@ -67,6 +75,13 @@ Resources:
             ApiId:
               Ref: HttpApi
             Path: /dap
+            Method: GET
+        OauthCallback:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /oauth/callback
             Method: GET
         GetProduct:
           Type: HttpApi
