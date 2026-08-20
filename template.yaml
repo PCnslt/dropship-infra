@@ -16,8 +16,26 @@ Globals:
         ALIEXPRESS_APP_KEY: "543286"
         ALIEXPRESS_APP_SECRET: "au5slCs3eWYNug7ndAbBUx18HLP3X9uc"
         ALIEXPRESS_SESSION: ""
+        TABLE_NAME: dropship-catalog
 
 Resources:
+  # ---------- Catalog table ----------
+  CatalogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: dropship-catalog
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
   # ---------- Shared layer ----------
   SharedLayer:
     Type: AWS::Serverless::LayerVersion
@@ -42,6 +60,8 @@ Resources:
     Properties:
       CodeUri: ../dropship-catalog-service/src/
       Policies:
+        - DynamoDBCrudPolicy:
+            TableName: dropship-catalog
         - SSMParameterReadPolicy:
             ParameterName: dropship/aliexpress/*
         - Statement:
@@ -61,6 +81,9 @@ Resources:
         OauthCallback:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: /oauth/callback, Method: GET }
+        ImportProduct:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /import, Method: POST }
         GetProduct:
           Type: HttpApi
           Properties: { ApiId: !Ref HttpApi, Path: "/products/{id}", Method: GET }
