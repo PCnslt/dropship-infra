@@ -35,6 +35,28 @@ class AliExpressClient:
         self.app_key = app_key or os.environ.get("ALIEXPRESS_APP_KEY", "")
         self.app_secret = app_secret or os.environ.get("ALIEXPRESS_APP_SECRET", "")
         self.session = session or os.environ.get("ALIEXPRESS_SESSION", "")
+        # Secrets live in AWS SSM Parameter Store (SecureString), never in code.
+        if not self.app_key or not self.app_secret:
+            self._load_credentials_from_ssm()
+
+    def _load_credentials_from_ssm(self):
+        """Fetch app_key/app_secret from SSM Parameter Store (SecureString)."""
+        try:
+            import boto3
+            ssm = boto3.client("ssm", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+            names = []
+            if not self.app_key:
+                names.append("/dropship/aliexpress/app_key")
+            if not self.app_secret:
+                names.append("/dropship/aliexpress/app_secret")
+            r = ssm.get_parameters(Names=names, WithDecryption=True)
+            for p in r.get("Parameters", []):
+                if p["Name"].endswith("/app_key"):
+                    self.app_key = p["Value"]
+                elif p["Name"].endswith("/app_secret"):
+                    self.app_secret = p["Value"]
+        except Exception as e:
+            print(f"[ae] SSM credential lookup failed: {e}")
 
     # ---------- signing ----------
     def _sign(self, method, params):

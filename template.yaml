@@ -13,9 +13,6 @@ Globals:
       - !Ref SharedLayer
     Environment:
       Variables:
-        ALIEXPRESS_APP_KEY: "543286"
-        ALIEXPRESS_APP_SECRET: "au5slCs3eWYNug7ndAbBUx18HLP3X9uc"
-        ALIEXPRESS_SESSION: ""
         TABLE_NAME: dropship-catalog
 
 Resources:
