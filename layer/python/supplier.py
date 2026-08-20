@@ -64,11 +64,58 @@ class AliExpressProvider:
         raw = self.client.product_details(product_id, **kw)
         return _map_product(raw)
 
+    def search(self, feed_name="DS_ConsumerElectronics_bestsellers", page_size="20", country="US", **kw):
+        """Pull real products from an AliExpress dropship feed."""
+        raw = self.client._call("aliexpress.ds.recommend.feed.get", {
+            "feed_name": feed_name, "country": country, "page_size": page_size,
+            "page_no": kw.get("page_no", "1"),
+            "target_currency": kw.get("currency", "USD"),
+            "target_language": kw.get("lang", "EN"),
+        })
+        return _map_feed(raw)
+
     def create_order(self, logistics_address, product_items):
         return self.client.create_order(logistics_address, product_items)
 
     def order_details(self, order_id):
         return self.client.order_details(order_id)
+
+
+def _map_feed(raw):
+    """Map the recommend-feed response to a flat list of products."""
+    rsp = raw.get("aliexpress_ds_recommend_feed_get_response", raw)
+    if not isinstance(rsp, dict):
+        return []
+    result = rsp.get("result") or {}
+    products = result.get("products") or {}
+    arr = products.get("traffic_product_d_t_o") or products.get("traffic_product_dto") or []
+    if isinstance(arr, dict):
+        arr = [arr]
+    out = []
+    for p in arr:
+        if not isinstance(p, dict):
+            continue
+        img = p.get("product_main_image_url") or ""
+        imgs = p.get("product_small_image_urls") or {}
+        if not img and imgs.get("productSmallImageUrl"):
+            img = imgs["productSmallImageUrl"][0]
+        price = p.get("target_sale_price") or p.get("sale_price") or "0"
+        out.append({
+            "id": str(p.get("product_id") or ""),
+            "source_product_id": str(p.get("product_id") or ""),
+            "title": p.get("product_title") or "",
+            "price": float(price or 0),
+            "currency": p.get("target_sale_price_currency") or p.get("sale_price_currency") or "USD",
+            "image": img,
+            "images": imgs.get("productSmallImageUrl", []),
+            "source": "aliexpress",
+            "category": p.get("first_level_category_name", "") or p.get("second_level_category_name", ""),
+            "rating": p.get("evaluate_rate", ""),
+            "volume": p.get("lastest_volume", 0),
+            "discount": p.get("discount", ""),
+            "detail_url": p.get("product_detail_url", ""),
+        })
+    return out
 
 
 def _map_product(raw):

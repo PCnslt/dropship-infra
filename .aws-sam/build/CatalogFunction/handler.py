@@ -63,61 +63,88 @@ def _resolve(prov, source_pid):
 def h_list_products(event):
     qs = event.get("queryStringParameters") or {}
     q = (qs.get("q") or "").lower()
+    feed = qs.get("feed") or ""
     prov = supplier.get_provider()
-    curated = db.list_products()
-    out = []
-    for c in curated:
-        p = _resolve(prov, c["source_product_id"])
-        base = {
-            "id": c["id"],
-            "source_product_id": c["source_product_id"],
-            "title": (c.get("title") or (p or {}).get("title") or "Product"),
-            "image": c.get("image") or (p or {}).get("image") or "",
-            "category": c.get("category", ""),
-        }
-        if p:
-            source_cost = float(p.get("price", 0) or 0)
-            ship = 5.0
-            price = pricing.price_product(source_cost, ship)
-            base["list_price"] = price.list_price
-            base["source_cost"] = source_cost
-        else:
-            base["list_price"] = None
-        if q:
-            if q not in base["title"].lower() and q not in base["category"].lower():
-                continue
-        out.append(base)
-    out = [o for o in out if o.get("list_price") is not None]
 
-    # Demo fallback: if no curated products are resolvable yet (e.g. app still
-    # in "Test" status), return mock products so the storefront is never empty.
-    if not out:
-        from supplier import MockProvider
-        for p in MockProvider().search(""):
-            price = pricing.price_product(p["price"], p["shipping"])
-            out.append({"id": p["id"], "source_product_id": p["id"], "title": p["title"],
-                        "image": "", "category": p["category"], "list_price": price.list_price,
-                        "source_cost": p["price"]})
+    # Real provider: pull live products from AliExpress feed (or curated catalog).
+    if prov.name == "aliexpress":
+        try:
+            if feed:
+                raw = prov.search(feed_name=feed, page_size="20", country=qs.get("country", "US"))
+            else:
+                # if curated catalog has items, resolve them; else pull default feed
+                curated = db.list_products()
+                if curated:
+                    raw = []
+                    for c in curated:
+                        p = prov.product_details(c["source_product_id"])
+                        if p and "error" not in p:
+                            raw.append({"id": c["id"], "source_product_id": c["source_product_id"],
+                                        "title": c.get("title") or p.get("title"),
+                                        "price": p.get("price", 0),
+                                        "image": c.get("image") or p.get("image"),
+                                        "category": c.get("category", "")})
+                else:
+                    raw = prov.search(feed_name="DS_ConsumerElectronics_bestsellers", page_size="20", country="US")
+            out = []
+            for p in raw:
+                source_cost = float(p.get("price", 0) or 0)
+                price = pricing.price_product(source_cost, 5.0)
+                title = p.get("title", "")
+                if q and q not in title.lower() and q not in (p.get("category", "") or "").lower():
+                    continue
+                out.append({"id": p.get("id"), "source_product_id": p.get("source_product_id"),
+                            "title": title, "image": p.get("image", ""),
+                            "category": p.get("category", ""),
+                            "rating": p.get("rating", ""), "volume": p.get("volume", 0),
+                            "discount": p.get("discount", ""),
+                            "list_price": price.list_price, "source_cost": source_cost,
+                            "list_currency": price.currency})
+            return ok({"products": out})
+        except Exception as e:
+            print(f"[catalog] live products failed, fallback: {e}")
+            # fall through to demo
+
+    # Demo fallback (or mock provider)
+    from supplier import MockProvider
+    out = []
+    for p in MockProvider().search(""):
+        price = pricing.price_product(p["price"], p["shipping"])
+        if q and q not in p["title"].lower():
+            continue
+        out.append({"id": p["id"], "source_product_id": p["id"], "title": p["title"],
+                    "image": "", "category": p["category"], "list_price": price.list_price,
+                    "source_cost": p["price"]})
     return ok({"products": out})
 
 
 def h_get_product(event, pid):
     prov = supplier.get_provider()
+    # try curated catalog first, then live supplier lookup
     c = db.get_product(pid)
-    if not c:
-        return err("not found", 404)
-    p = _resolve(prov, c["source_product_id"])
+    if c:
+        p = _resolve(prov, c["source_product_id"])
+        if p and "error" not in p:
+            source_cost = float(p.get("price", 0) or 0)
+            price = pricing.price_product(source_cost, 5.0)
+            return ok({"product": {
+                "id": c["id"], "source_product_id": c["source_product_id"],
+                "title": c.get("title") or p.get("title") or "Product",
+                "image": c.get("image") or p.get("image") or "",
+                "list_price": price.list_price, "source_cost": source_cost,
+                "shipping": 5.0, "breakdown": price.__dict__, "dap": True,
+            }})
+    # live lookup by product id
+    p = _resolve(prov, pid)
     if not p:
         return err("product unavailable from supplier", 404)
     source_cost = float(p.get("price", 0) or 0)
-    ship = 5.0
-    price = pricing.price_product(source_cost, ship)
+    price = pricing.price_product(source_cost, 5.0)
     return ok({"product": {
-        "id": c["id"], "source_product_id": c["source_product_id"],
-        "title": c.get("title") or p.get("title") or "Product",
-        "image": c.get("image") or p.get("image") or "",
+        "id": pid, "source_product_id": pid,
+        "title": p.get("title") or "Product", "image": p.get("image") or "",
         "list_price": price.list_price, "source_cost": source_cost,
-        "shipping": ship, "breakdown": price.__dict__, "dap": True,
+        "shipping": 5.0, "breakdown": price.__dict__, "dap": True,
     }})
 
 
